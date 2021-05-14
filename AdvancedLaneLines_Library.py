@@ -6,17 +6,9 @@ Created on Sun May  9 18:24:15 2021
 @author: varun
 """
 
-import matplotlib.pyplot as plt
-import matplotlib.image as img
 import numpy as np
 import cv2
-import glob
-import os
-from CameraCalibration import cal_undistort
-import pickle
 
-abspath = os.path.abspath('') ## String which contains absolute path to the script file
-os.chdir(abspath) ## Setting up working directory
 
 ##################### Function to plot image in RGB and HLS space to identify suitable channel ######################
 def RGBAndHLSView(image):
@@ -218,7 +210,7 @@ def Perspective_transform(image, image_size, src, dest):
     # Warping the image
     warpedimage = cv2.warpPerspective(image, M, image_size, flags=cv2.INTER_LINEAR)
     
-    return warpedimage
+    return warpedimage, Minv
 
 ########################### Function to calculate histogram to detect lane lines ################################
 def hist(image):
@@ -320,170 +312,62 @@ def FindLaneLines(warpedimage):
 
     ## Visualization ##
     # Colors in the left and right lane regions
-    out_image[lefty, leftx] = [100, 0, 0]
-    out_image[righty, rightx] = [0, 0, 100]
+    out_image[lefty, leftx] = [255, 0, 0]
+    out_image[righty, rightx] = [0, 0, 255]
     
-    # Plots the left and right polynomials on the lane lines
-    #plt.plot(left_fitx, ploty, color='yellow')
-    #plt.plot(right_fitx, ploty, color='yellow')
     
-    return out_image, left_fit, right_fit
+    return out_image, leftx, lefty, rightx, righty, left_fitx, right_fitx, ploty
  
-################################### Function to find lane pixels ################################################
-def PolyFitUsingPrev(image, left_fit, right_fit):
+############################ Function to find lane curvature and offset #########################################
+def FindingCurvature(leftx, lefty, rightx, righty, image_size):
     
-    # Width of margin around previous polynomial to search
-    margin = 100
+    # Conversions from pixels to meters in X and Y
+    ym_per_pixel = 30/720.0
+    xm_per_pixel = 3.7/700.0
     
-    # Grabbing activated pixels
-    nonzero = binary_warped.nonzero()
-    nonzeroy = np.array(nonzero[0])
-    nonzerox = np.array(nonzero[1])
+    #Defining y-value where we want our radius of curvature
+    y_eval = image_size[0]
     
-    left_lane_inds = ((nonzerox > (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] - margin)) & (nonzerox < (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] + margin)))
-    right_lane_inds = ((nonzerox > (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] - margin)) & (nonzerox < (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] + margin)))
+    # Fitting new polynomials to X and Y
+    left_fit = np.polyfit(lefty*ym_per_pixel, leftx*xm_per_pixel, 2)
+    right_fit = np.polyfit(righty*ym_per_pixel, rightx*xm_per_pixel, 2)
     
-    # Again, extract left and right line pixel positions
-    leftx = nonzerox[left_lane_inds]
-    lefty = nonzeroy[left_lane_inds] 
-    rightx = nonzerox[right_lane_inds]
-    righty = nonzeroy[right_lane_inds]                                                       
-                                                          
-    # Fit new polynomials
-    left_fitx = np.polyfit(lefty, leftx, 2)
-    right_fitx = np.polyfit(righty, rightx, 2)
+    # Calculating the new radii of curvature
+    left_curverad = ((1 + (2*left_fit[0]*ym_per_pixel*y_eval + left_fit[1])**2)**1.5) / np.absolute(2*left_fit[0])
+    right_curverad = ((1 + (2*right_fit[0]*ym_per_pixel*y_eval + right_fit[1])**2)**1.5) / np.absolute(2*right_fit[0])
     
-    return left_fitx, right_fitx
+    # Offset from lane center
+    left_intercept = left_fit[0]*image_size[1]**2 + left_fit[1]*image_size[1] + left_fit[2]
+    right_intercept = right_fit[0]*image_size[1]**2 + right_fit[1]*image_size[1] + right_fit[2]
+    mid_lane = (left_intercept + right_intercept)/2
+    offset = (mid_lane - image_size[0]/2)*xm_per_pixel
+    
+    return left_curverad, right_curverad, offset
+
+############################ Function to draw lane lines on original image #########################################
+def DrawLines(image, warpedimage, left_fitx, right_fitx, ploty, Minv):
+    
+    # Create an image to draw the lines on
+    warp_zero = np.zeros_like(warpedimage).astype(np.uint8)
+    color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
+    
+    # Recast the x and y points into usable format for cv2.fillPoly()
+    pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
+    pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
+    pts = np.hstack((pts_left, pts_right))
+    
+    # Draw the lane onto the warped blank image
+    cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
+    
+    # Warp the blank back to original image space using inverse perspective matrix (Minv)
+    newwarp = cv2.warpPerspective(color_warp, Minv, (image.shape[1], image.shape[0]))
+    
+    # Combine the result with the original image
+    result = cv2.addWeighted(image, 1, newwarp, 0.3, 0)
+
+    return result    
 
 
-
-
-
-
-
-
-
-
-
-
-
-########################################################################################################
-############################################## Main ####################################################
-######################################################################################################## 
-
-# Reading image from folder
-image = img.imread('test_images/test2.jpg')
-
-# Image size
-image_size = (image.shape[1], image.shape[0])
-
-# Loading calibration parameters 
-calib = pickle.load( open ("camcalib_data.pkl", "rb"))
-mtx1 = calib["mtx"]
-dist1 = calib["dist"]
-
-# Undistroting the image
-image = cal_undistort(image, mtx1, dist1)
-
-# Performing gradient X and Y, magnitude and direction masking
-bin_gradx = Thresholding_grad(image, orient = 'x', sobel_kernel = 3, gradThresh = (30, 100))
-bin_grady = Thresholding_grad(image, orient = 'y', sobel_kernel = 3, gradThresh = (30, 100))
-bin_mag = Thresholding_mag(image, sobel_kernel = 3, magThresh = (30, 100))
-bin_dir = Thresholding_dir(image, sobel_kernel = 3, dirThresh = (0.7, 1.3))
-
-# Combining above thresholds
-bin_comb = Thresholding_combined(bin_gradx, bin_grady, bin_mag, bin_dir)
-
-# # Visualize binaries of gradiants
-# f, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2,2, figsize=(24,9))
-# f.tight_layout()
-# ax1.imshow(bin_gradx)
-# ax1.set_title('Gradient X')
-# ax2.imshow(bin_grady)
-# ax2.set_title('Gradient Y')
-# ax3.imshow(bin_mag)
-# ax3.set_title('Magnitude X and Y')
-# ax4.imshow(bin_dir)
-# ax4.set_title('Direction X and Y')
-
-# Visualizing RGB, HLS and LAB thresholds
-rgb_colr = Thresholding_RGBcolor(image, colorspace = 'R', colThresh = (150,255))
-rgb_colg = Thresholding_RGBcolor(image, colorspace = 'G', colThresh = (150,255))
-rgb_colb = Thresholding_RGBcolor(image, colorspace = 'B', colThresh = (220,255))
-hls_colh = Thresholding_HLScolor(image, colorspace = 'H', colThresh = (150, 255))
-hls_coll = Thresholding_HLScolor(image, colorspace = 'L', colThresh = (180, 255))
-hls_cols = Thresholding_HLScolor(image, colorspace = 'S', colThresh = (150, 255))
-lab_coll = Thresholding_LABcolor(image, colorspace = 'L', colThresh = (230, 255))
-lab_cola = Thresholding_LABcolor(image, colorspace = 'A', colThresh = (150, 255))
-lab_colb = Thresholding_LABcolor(image, colorspace = 'B', colThresh = (155, 255))
-luv_coll = Thresholding_LUVcolor(image, colorspace = 'L', colThresh = (210, 255))
-luv_colu = Thresholding_LUVcolor(image, colorspace = 'U', colThresh = (155, 255))
-luv_colv = Thresholding_LUVcolor(image, colorspace = 'V', colThresh = (155, 255))
-
-
-f, ((ax1, ax2, ax3), (ax4, ax5, ax6), (ax7, ax8, ax9)) = plt.subplots(3,3, figsize=(24,9))
-f.tight_layout()
-ax1.imshow(rgb_colr)
-ax1.set_title('R space')
-ax2.imshow(rgb_colg)
-ax2.set_title('G space')
-ax3.imshow(rgb_colb)
-ax3.set_title('B space')
-ax4.imshow(hls_colh)
-ax4.set_title('H space')
-ax5.imshow(hls_coll)
-ax5.set_title('L space')
-ax6.imshow(hls_cols)
-ax6.set_title('S space')
-ax7.imshow(lab_coll)
-ax7.set_title('L space')
-ax8.imshow(lab_cola)
-ax8.set_title('A space')
-ax9.imshow(lab_colb)
-ax9.set_title('B space')
-
-
-# Combining B, S and L space
-bin_col = np.zeros_like(rgb_colb)
-bin_col[ (luv_coll == 1) | (rgb_colb == 1) | (lab_coll == 1)] = 1
-
-
-# Combining gradient and color thresholding
-bin_combcol = np.zeros_like(bin_comb)
-bin_combcol[(bin_comb == 1) | (bin_col == 1)] = 1
-
-
-
-#Defining src and dest for perspective transformation
-src = np.float32([[560,460],
-                  [710,460],
-                  [260,680],
-                  [1050,680]])
-
-dest = np.float32([[100,0],
-                  [1050,0],
-                  [100,680],
-                  [1050,680]])
-
-
-# Warping the image for bird eye view
-warpedimage = Perspective_transform(bin_combcol, image_size, src, dest)
-
-# Finding lana lines using moving window
-out_image = FindLaneLines(warpedimage)
-
-# Visualing the stages of pipeline
-f, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2,2, figsize=(24,9))
-f.tight_layout()
-
-ax1.imshow(image)
-ax1.set_title('Actual image')
-ax2.imshow(bin_combcol)
-ax2.set_title('Thresholded image')
-ax3.imshow(warpedimage)
-ax3.set_title('Warped image')
-ax4.imshow(out_image)
-ax4.set_title('Lane lines')
 
 
 
