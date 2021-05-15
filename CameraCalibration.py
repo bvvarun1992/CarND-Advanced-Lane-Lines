@@ -76,7 +76,15 @@ mtx1 = calib["mtx"]
 dist1 = calib["dist"]
 image1 = img.imread('camera_cal/calibration1.jpg')
 undistort_img = cal_undistort(image1, mtx1, dist1)
-# plt.imshow(undistort_img)
-# plt.show()
+
+# #Plotting undistorted image
+# fig1, (ax1, ax2) = plt.subplots(1,2)
+# fig1.tight_layout()
+
+# ax1.set_title('Original image')
+# ax1.imshow(image1)
+# ax2.set_title('Undistorted image')
+# ax2.imshow(undistort_img)
+
     
         
