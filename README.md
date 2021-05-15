@@ -20,4 +20,5 @@ The goals / steps of this project are the following:
 * The file `ImageProcessing.py` contains the SW pipeline to identify lane lines on single images and draw the lines back on the image and display information about the curvature and vehicle position.
 * The file `VideoProcessing.py` contains SW pipeline to process the frames of video to identify lane lines, calculate the radius of curvature and display them back on the written video.
 * There are few single images present in folder `./test_images/test*.jpg` that are used to test the pipeline. The folder `./output_images` and `./output_videos`contains the results of an example image and video tested on the pipeline.
+* The file `writeup.md` file is the final report explaining briefly the steps taken in the pipeline.
 ---
