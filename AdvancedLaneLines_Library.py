@@ -235,7 +235,7 @@ def FindLaneLines(warpedimage):
     # Creating image to visualize results
     out_image = np.dstack((warpedimage, warpedimage, warpedimage))*255
     
-    #Finding peaks of lest and right lines
+    #Finding peaks of left and right lines
     midpoint = np.int(histogram.shape[0]//2)
     leftx_base = np.argmax(histogram[:midpoint])
     rightx_base = np.argmax(histogram[midpoint:]) + midpoint
@@ -326,7 +326,7 @@ def FindingCurvature(leftx, lefty, rightx, righty, image_size):
     xm_per_pixel = 3.7/700.0
     
     #Defining y-value where we want our radius of curvature
-    y_eval = image_size[0]
+    y_eval = image_size[1]
     
     # Fitting new polynomials to X and Y
     left_fit = np.polyfit(lefty*ym_per_pixel, leftx*xm_per_pixel, 2)
@@ -337,10 +337,13 @@ def FindingCurvature(leftx, lefty, rightx, righty, image_size):
     right_curverad = ((1 + (2*right_fit[0]*ym_per_pixel*y_eval + right_fit[1])**2)**1.5) / np.absolute(2*right_fit[0])
     
     # Offset from lane center
-    left_intercept = left_fit[0]*image_size[1]**2 + left_fit[1]*image_size[1] + left_fit[2]
-    right_intercept = right_fit[0]*image_size[1]**2 + right_fit[1]*image_size[1] + right_fit[2]
-    mid_lane = (left_intercept + right_intercept)/2
-    offset = (mid_lane - image_size[0]/2)*xm_per_pixel
+    imagexinm = image_size[0]*xm_per_pixel
+    imageyinm = image_size[1]*ym_per_pixel
+    left_line = left_fit[0]*imageyinm**2 + left_fit[1]*imageyinm + left_fit[2]
+    right_line = right_fit[0]*imageyinm**2 + right_fit[1]*imageyinm + right_fit[2]
+    mid_lane = left_line + (right_line - left_line)/2
+    mid_vehicle = imagexinm / 2
+    offset = (mid_lane - mid_vehicle)
     
     return left_curverad, right_curverad, offset
 
